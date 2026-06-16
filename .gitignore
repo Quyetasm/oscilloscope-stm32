@@ -1,0 +1,15 @@
+# Build artifacts
+build/
+Debug/
+Release/
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# IDE
+.metadata/
+*.launch
