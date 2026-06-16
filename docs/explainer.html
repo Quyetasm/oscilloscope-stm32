@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Как устроена прошивка осциллографа на STM32 — интерактивный разбор</title>
+<style>
+  :root{
+    --bg:#070b09; --bg2:#0d1410; --card:#101a14; --card2:#16241b;
+    --grid:#1c2c22; --line:#243a2d;
+    --green:#39e08a; --green-dim:#1f7a4d; --cyan:#33e0e0; --yellow:#ffe05a;
+    --red:#ff5a6a; --text:#d6efe2; --muted:#7fa692; --accent:#39e08a;
+    --code-bg:#0a120d; --kw:#ff8ac4; --ty:#5ad1ff; --num:#ffc56a;
+    --str:#9be86a; --com:#5a7a68; --pp:#c79bff;
+    --radius:14px; --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:radial-gradient(1200px 600px at 80% -10%,#0f2018,transparent),var(--bg);
+    color:var(--text);font-family:var(--sans);line-height:1.65;font-size:16px;
+  }
+  a{color:var(--green);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* layout */
+  .layout{display:grid;grid-template-columns:260px 1fr;max-width:1320px;margin:0 auto}
+  nav.side{
+    position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+    padding:24px 16px;border-right:1px solid var(--line);background:rgba(8,14,11,.6)
+  }
+  nav.side h2{font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin:18px 8px 8px}
+  nav.side a{display:block;padding:7px 10px;border-radius:9px;color:var(--muted);font-size:14px;border-left:2px solid transparent}
+  nav.side a:hover{background:var(--card);color:var(--text);text-decoration:none}
+  nav.side a.active{color:var(--green);background:var(--card2);border-left-color:var(--green)}
+  main{padding:40px 48px;min-width:0}
+  @media(max-width:900px){
+    .layout{grid-template-columns:1fr}
+    nav.side{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}
+    main{padding:24px 18px}
+  }
+
+  /* hero */
+  .hero{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:32px;background:var(--bg2)}
+  .hero-top{padding:30px 30px 10px}
+  .hero h1{margin:0 0 6px;font-size:30px;background:linear-gradient(90deg,var(--green),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{margin:6px 0 0;color:var(--muted);max-width:680px}
+  canvas.scope{display:block;width:100%;height:200px;background:
+    repeating-linear-gradient(0deg,transparent 0 39px,var(--grid) 39px 40px),
+    repeating-linear-gradient(90deg,transparent 0 39px,var(--grid) 39px 40px),
+    #050a07;border-top:1px solid var(--line)}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .badge{font-size:12px;padding:4px 10px;border-radius:99px;background:var(--card2);border:1px solid var(--line);color:var(--green)}
+
+  h2.sec{font-size:24px;margin:46px 0 6px;padding-top:12px;display:flex;align-items:center;gap:12px}
+  h2.sec .n{font-family:var(--mono);font-size:15px;color:var(--bg);background:var(--green);width:30px;height:30px;
+    border-radius:8px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+  h3{font-size:18px;margin:26px 0 6px;color:var(--cyan)}
+  p.lead{color:var(--muted);margin-top:2px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin:18px 0}
+
+  /* analogy / beginner callouts */
+  .callout{border-radius:12px;padding:14px 16px 14px 46px;margin:16px 0;position:relative;border:1px solid}
+  .callout::before{position:absolute;left:14px;top:13px;font-size:18px}
+  .analogy{background:#10231a;border-color:#1d5e3e}
+  .analogy::before{content:"💡"}
+  .cnote{background:#101a2a;border-color:#2a4a7a}
+  .cnote::before{content:"🅒"}
+  .warn{background:#2a1414;border-color:#7a2a2a}
+  .warn::before{content:"⚠️"}
+  .callout b{color:var(--text)}
+  .callout .t{font-weight:700;display:block;margin-bottom:3px;color:var(--text)}
+
+  /* code */
+  pre{margin:14px 0;background:var(--code-bg);border:1px solid var(--line);border-radius:12px;overflow:auto}
+  pre .head{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;border-bottom:1px solid var(--line);background:#0c1510}
+  pre .head .file{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  pre .head .dot{display:inline-block;width:10px;height:10px;border-radius:99px;margin-right:5px}
+  code.c{display:block;padding:14px 16px;font-family:var(--mono);font-size:13.5px;line-height:1.7;white-space:pre;color:#cfe8da}
+  .tok-kw{color:var(--kw)} .tok-ty{color:var(--ty)} .tok-num{color:var(--num)}
+  .tok-str{color:var(--str)} .tok-com{color:var(--com);font-style:italic} .tok-pp{color:var(--pp)}
+
+  /* line-by-line breakdown */
+  .breakdown{list-style:none;padding:0;margin:10px 0}
+  .breakdown li{padding:8px 0 8px 0;border-bottom:1px dashed var(--line);display:grid;grid-template-columns:auto 1fr;gap:12px}
+  .breakdown li:last-child{border-bottom:none}
+  .breakdown code{font-family:var(--mono);font-size:12.5px;color:var(--yellow);background:#141f18;padding:2px 7px;border-radius:6px;white-space:nowrap;height:fit-content}
+
+  /* interactive widgets */
+  .demo{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:18px;margin:16px 0}
+  .demo h4{margin:0 0 10px;color:var(--green);font-size:15px;display:flex;align-items:center;gap:8px}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0}
+  button.btn{background:var(--card2);color:var(--text);border:1px solid var(--line);padding:9px 16px;border-radius:9px;cursor:pointer;font-size:14px;font-family:var(--sans)}
+  button.btn:hover{border-color:var(--green);color:var(--green)}
+  button.btn:active{transform:translateY(1px)}
+  input[type=range]{accent-color:var(--green);width:200px}
+  .pill{font-family:var(--mono);font-size:13px;padding:3px 9px;border-radius:7px;background:#0c1510;border:1px solid var(--line)}
+  .val{color:var(--yellow)}
+
+  table.spec{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  table.spec th,table.spec td{border:1px solid var(--line);padding:8px 11px;text-align:left}
+  table.spec th{background:var(--card2);color:var(--green)}
+  table.spec td code{color:var(--yellow);font-family:var(--mono);font-size:12.5px}
+
+  details.acc{border:1px solid var(--line);border-radius:12px;margin:14px 0;background:var(--card);overflow:hidden}
+  details.acc>summary{cursor:pointer;padding:14px 18px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  details.acc>summary::-webkit-details-marker{display:none}
+  details.acc>summary::after{content:"▸";color:var(--green);transition:.2s}
+  details.acc[open]>summary::after{transform:rotate(90deg)}
+  details.acc .body{padding:0 18px 16px}
+
+  /* flow diagram */
+  .flow{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;margin:18px 0}
+  .flow .step{flex:1 1 130px;min-width:130px;background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:12px;text-align:center;position:relative}
+  .flow .step .ic{font-size:24px}
+  .flow .step .nm{font-weight:700;font-size:14px;margin-top:4px;color:var(--green)}
+  .flow .step .ds{font-size:12px;color:var(--muted);margin-top:3px}
+  .flow .arrow{display:flex;align-items:center;color:var(--green-dim);font-size:22px;padding:0 4px}
+  @media(max-width:700px){.flow .arrow{transform:rotate(90deg)}.flow{flex-direction:column}}
+
+  .kbd{font-family:var(--mono);background:#141f18;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:12px}
+  footer{margin:60px 0 30px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;text-align:center}
+  .bitgrid{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
+  .bit{width:26px;height:26px;border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;background:#0c1510}
+  .bit.on{background:var(--green);color:#04130a;font-weight:700;border-color:var(--green)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:14px;height:14px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="side" id="nav">
+  <h2>Разделы</h2>
+  <a href="#intro">Что это вообще такое</a>
+  <a href="#flow">Путь сигнала целиком</a>
+  <a href="#c101">Мини-ликбез по C</a>
+  <a href="#display">1. Дисплей ILI9488</a>
+  <a href="#adc">2. Захват: АЦП + DMA</a>
+  <a href="#encoder">3. Энкодеры и серый код</a>
+  <a href="#trigger">4. Триггер</a>
+  <a href="#meas">5. Измерения</a>
+  <a href="#ui">6. Отрисовка экрана</a>
+  <a href="#fsm">7. Главный автомат</a>
+  <a href="#glossary">Словарик терминов</a>
+</nav>
+
+<main>
+  <div class="hero">
+    <div class="hero-top">
+      <h1>Как работает прошивка осциллографа на STM32</h1>
+      <p>Интерактивный разбор «на пальцах»: как микроконтроллер измеряет напряжение, ловит сигнал и рисует осциллограмму на экране. С кусочками настоящего кода и пояснениями для тех, кто <b>совсем не дружит с C</b>.</p>
+      <div class="badges">
+        <span class="badge">STM32F411 · 100 МГц</span>
+        <span class="badge">Дисплей ILI9488 480×320</span>
+        <span class="badge">АЦП + DMA</span>
+        <span class="badge">2 энкодера</span>
+        <span class="badge">чистый C, без библиотек</span>
+      </div>
+    </div>
+    <canvas class="scope" id="heroScope"></canvas>
+  </div>
+
+  <!-- ============ INTRO ============ -->
+  <h2 class="sec" id="intro"><span class="n">?</span>Что это вообще такое</h2>
+  <p class="lead">Осциллограф — это прибор, который показывает, как <b>напряжение меняется во времени</b>, в виде «волны» на экране. По горизонтали — время, по вертикали — напряжение.</p>
+
+  <div class="card">
+    <p>Внутри нашего устройства происходит вот что:</p>
+    <ol>
+      <li>Провод с сигналом подключён к ножке <span class="pill">PA1</span> микроконтроллера.</li>
+      <li>Микроконтроллер тысячи раз в секунду <b>замеряет</b> напряжение на этой ножке и превращает его в число.</li>
+      <li>Эти числа складываются в память, обрабатываются и <b>превращаются в линию</b> на TFT-дисплее.</li>
+      <li>Двумя крутилками (энкодерами) человек меняет масштаб по времени и по напряжению.</li>
+    </ol>
+    <div class="callout analogy"><span class="t">Аналогия</span>
+      Представьте, что вы каждую долю секунды измеряете рулеткой высоту волны на море и ставите точку на миллиметровке. Соедините точки линией — получится «осциллограмма». Микроконтроллер делает ровно это, только <b>2 миллиона раз в секунду</b>.
+    </div>
+  </div>
+
+  <h3>Из чего собран проект (8 «кубиков»)</h3>
+  <p class="lead">Код разбит на независимые модули — так проще понять и чинить. Каждый отвечает за одну задачу.</p>
+  <table class="spec">
+    <tr><th>Модуль</th><th>За что отвечает</th><th>Главная идея</th></tr>
+    <tr><td><code>ili9488</code></td><td>Рисование на экране</td><td>Превращает «нарисуй пиксель» в сигналы по проводу SPI</td></tr>
+    <tr><td><code>adc_dma</code></td><td>Замер сигнала</td><td>АЦП измеряет, DMA сам складывает числа в память</td></tr>
+    <tr><td><code>encoder</code></td><td>Крутилки</td><td>Понимает, в какую сторону и насколько крутят</td></tr>
+    <tr><td><code>trigger</code></td><td>«Стабилизация» картинки</td><td>Находит одинаковую точку волны, чтобы она не «убегала»</td></tr>
+    <tr><td><code>measurements</code></td><td>Авто-измерения</td><td>Считает размах, среднее, частоту сигнала</td></tr>
+    <tr><td><code>display_ui</code></td><td>Интерфейс</td><td>Сетка, сама волна, надписи, статус</td></tr>
+    <tr><td><code>oscilloscope</code></td><td>«Мозг»</td><td>Связывает всё вместе, реагирует на кнопки</td></tr>
+    <tr><td><code>main</code></td><td>Запуск</td><td>Включает железо и крутит главный цикл</td></tr>
+  </table>
+
+  <!-- ============ FLOW ============ -->
+  <h2 class="sec" id="flow"><span class="n">→</span>Путь сигнала целиком</h2>
+  <p class="lead">Прежде чем нырять в детали, посмотрим на всю цепочку. Сигнал проходит этот путь десятки раз в секунду:</p>
+
+  <div class="flow">
+    <div class="step"><div class="ic">🔌</div><div class="nm">Вход PA1</div><div class="ds">аналоговое напряжение</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">📏</div><div class="nm">АЦП</div><div class="ds">напряжение → число 0..4095</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">🚚</div><div class="nm">DMA</div><div class="ds">числа сами едут в память</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">🎯</div><div class="nm">Триггер</div><div class="ds">ищем точку старта волны</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">🧮</div><div class="nm">Измерения</div><div class="ds">Vpp, частота, среднее</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">🖥️</div><div class="nm">Экран</div><div class="ds">рисуем линию</div></div>
+  </div>
+
+  <div class="callout analogy"><span class="t">Зачем DMA?</span>
+    DMA (Direct Memory Access) — это «грузчик», который перетаскивает данные из АЦП в память <b>сам, без участия процессора</b>. Пока грузчик таскает числа, процессор свободен и занимается рисованием. Без него процессор бы только и делал, что забирал по одному числу — на всё остальное не хватило бы времени.
+  </div>
+
+  <!-- ============ C 101 ============ -->
+  <h2 class="sec" id="c101"><span class="n">C</span>Мини-ликбез по языку C</h2>
+  <p class="lead">Чтобы код ниже был понятен, разберём 6 вещей, которые встречаются постоянно. Раскройте любую карточку.</p>
+
+  <details class="acc"><summary>Типы чисел: <code>uint16_t</code>, <code>int32_t</code>, <code>float</code></summary>
+    <div class="body">
+      <p>В C важно заранее сказать, <b>какого размера</b> число. Имя типа описывает это:</p>
+      <ul>
+        <li><span class="pill">uint16_t</span> — целое <b>без знака</b>, 16 бит → значения 0…65535. (<i>u</i> = unsigned, без минуса).</li>
+        <li><span class="pill">int32_t</span> — целое <b>со знаком</b>, 32 бита → примерно ±2 миллиарда.</li>
+        <li><span class="pill">uint8_t</span> — один байт, 0…255. Удобно для цвета, флагов.</li>
+        <li><span class="pill">float</span> — дробное число (3.14, 1.65). У STM32F4 есть отдельный «калькулятор» для них (FPU), поэтому это быстро.</li>
+      </ul>
+      <div class="callout analogy">Размер выбирают как размер коробки: число от АЦП всегда 0…4095 — влезает в <code>uint16_t</code>, брать больше — тратить память зря.</div>
+    </div>
+  </details>
+
+  <details class="acc"><summary>Структуры <code>struct</code> — «карточка с полями»</summary>
+    <div class="body">
+      <p>Структура — это способ <b>склеить несколько значений в один объект</b>. Например, описание одного энкодера:</p>
+      <pre><div class="head"><span class="file">encoder.h</span></div><code class="c">typedef struct {
+    int32_t  position;     // накопленная позиция
+    int32_t  delta;        // насколько повернули с прошлого раза
+    uint8_t  btn_pressed;  // нажата ли кнопка (0 или 1)
+} Encoder_t;
+
+Encoder_t enc1;            // создали один такой объект
+enc1.position = 0;         // обращаемся к полю через точку</code></pre>
+      <div class="callout analogy">Это как анкета: одна «бумажка» <code>Encoder_t</code>, а в ней графы — позиция, дельта, кнопка. У каждого энкодера своя анкета.</div>
+    </div>
+  </details>
+
+  <details class="acc"><summary>Указатели и <code>*</code> — «адрес, а не само значение»</summary>
+    <div class="body">
+      <p>Указатель — это <b>адрес</b> в памяти, «где лежит» что-то. В функции часто передают не сам большой массив (это долго копировать), а только адрес его начала.</p>
+      <pre><code class="c">// buf — это адрес начала массива чисел, len — сколько их
+int32_t Trigger_Find(const uint16_t *buf, uint32_t len);
+//                                  ↑ звёздочка = «это указатель»
+buf[0]   // первое число
+buf[5]   // шестое число</code></pre>
+      <div class="callout analogy">Указатель — как адрес дома вместо самого дома. Дешевле дать другу адрес («ул. Памяти, 2048»), чем переносить весь дом.</div>
+    </div>
+  </details>
+
+  <details class="acc"><summary>Биты и операторы <code>&lt;&lt;</code> <code>|</code> <code>&amp;</code></summary>
+    <div class="body">
+      <p>Иногда нужно работать с отдельными <b>битами</b> (нулями и единицами). Это быстро и компактно.</p>
+      <ul>
+        <li><span class="pill">a &lt;&lt; 1</span> — сдвиг влево: биты «уезжают» на одну позицию (умножение на 2).</li>
+        <li><span class="pill">a | b</span> — ИЛИ: ставит бит, если он есть хоть в одном.</li>
+        <li><span class="pill">a &amp; b</span> — И: оставляет бит, только если он в обоих.</li>
+      </ul>
+      <pre><code class="c">uint8_t A = 1, B = 0;
+uint8_t state = (A &lt;&lt; 1) | B;   // склеили два бита в число: получилось 0b10 = 2</code></pre>
+      <div class="callout analogy">Так из сигналов двух проводов энкодера (A и B) делают одно маленькое число-«состояние».</div>
+    </div>
+  </details>
+
+  <details class="acc"><summary>Ключевое слово <code>volatile</code> — «не доверяй, перечитывай»</summary>
+    <div class="body">
+      <p>Обычно компилятор оптимизирует код и может «запомнить» значение переменной. Но если её меняет <b>железо или прерывание</b> в любой момент — нужно читать её заново каждый раз. Для этого пишут <code>volatile</code>.</p>
+      <pre><code class="c">volatile uint8_t adc_capture_done;  // флаг ставит прерывание АЦП</code></pre>
+      <div class="callout cnote"><span class="t">Почему важно</span>Без <code>volatile</code> главный цикл мог бы «не заметить», что прерывание уже подняло флаг «данные готовы», и зависнуть в ожидании.</div>
+    </div>
+  </details>
+
+  <details class="acc"><summary>Прерывания (interrupt / ISR) — «срочный звонок»</summary>
+    <div class="body">
+      <p>Прерывание — это функция, которую процессор вызывает <b>немедленно</b>, когда происходит событие (например, DMA дозаполнил буфер). Процессор бросает текущее дело, быстро обрабатывает событие и возвращается.</p>
+      <div class="callout analogy">Как телефонный звонок во время готовки: вы откладываете нож, отвечаете (коротко!) и возвращаетесь к готовке. ISR должна быть очень короткой.</div>
+    </div>
+  </details>
+
+  <!-- ============ DISPLAY ============ -->
+  <h2 class="sec" id="display"><span class="n">1</span>Дисплей ILI9488</h2>
+  <p class="lead">Дисплей не умеет «рисовать линию». Он умеет только одно: <b>закрасить пиксель цветом</b>. Всё остальное — буквы, волны, сетка — мы строим сами из пикселей.</p>
+
+  <h3>Как пиксель попадает на экран: шина SPI</h3>
+  <p>Микроконтроллер общается с дисплеем по <b>SPI</b> — это просто провод данных + провод тактов. По нему байты «выдавливаются» один за другим, очень быстро (50 миллионов раз в секунду). Ещё есть служебная ножка <span class="pill">DC</span>: она говорит дисплею «сейчас придёт <b>команда</b>» или «сейчас придут <b>данные</b>».</p>
+
+  <pre><div class="head"><span class="file">ili9488.c</span></div><code class="c">// DC=0 → это команда (например «приготовься принять окно»)
+static void ili_write_cmd(uint8_t cmd){
+    ili_dc_cmd();                                   // опустили ножку DC
+    HAL_SPI_Transmit(&amp;hspi1, &amp;cmd, 1, HAL_MAX_DELAY_MS);  // отправили 1 байт
+}
+// DC=1 → это данные (например цвет пикселя)
+static void ili_write_data(const uint8_t *data, uint16_t len){
+    ili_dc_data();                                  // подняли ножку DC
+    HAL_SPI_Transmit(&amp;hspi1, (uint8_t*)data, len, HAL_MAX_DELAY_MS);
+}</code></pre>
+  <div class="callout analogy">DC — как интонация. С одной интонацией вы говорите «приготовься» (команда), с другой — называете число (данные). Дисплей по DC понимает, что вы имеете в виду.</div>
+
+  <h3>Окно + поток цветов = быстрая заливка</h3>
+  <p>Чтобы залить прямоугольник, мы сначала командой задаём «окно» (от какого до какого пикселя), а потом просто <b>льём цвета подряд</b>. Дисплей сам раскладывает их по строкам.</p>
+  <pre><code class="c">void ILI9488_FillRect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint16_t color){
+    ILI9488_SetWindow(x, y, x+w-1, y+h-1);  // задали прямоугольную область
+    ili_push_color(color, (uint32_t)w*h);   // налили w*h одинаковых пикселей
+}</code></pre>
+  <p>Цвет хранится как <b>16 бит</b> в формате RGB565: 5 бит красного, 6 зелёного, 5 синего. Поэтому, например, чистый зелёный — это <code>0x07E0</code>.</p>
+
+  <h3>Шрифт 5×7: буквы из точек</h3>
+  <p>Каждая буква нарисована в сетке <b>5 точек в ширину × 7 в высоту</b>. Хранится как 5 чисел — по одному на колонку, где каждый бит = «точка горит или нет».</p>
+  <div id="fontDemo" class="demo">
+    <h4>🔤 Как буква «A» закодирована</h4>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px">Колонки буквы «A» — это числа <code>0x7E,0x11,0x11,0x11,0x7E</code>. Каждая единица — горящая точка. Вот как они складываются в букву:</p>
+    <div id="fontGrid" style="display:flex;gap:6px"></div>
+    <div class="legend"><span><span class="swatch" style="background:var(--green)"></span>точка горит (бит = 1)</span><span><span class="swatch" style="background:#0c1510;border:1px solid var(--line)"></span>не горит (бит = 0)</span></div>
+  </div>
+
+  <h3>Линия между двумя точками: алгоритм Брезенхэма</h3>
+  <p>Чтобы соединить две точки прямой, нельзя просто «провести линейку» — экран состоит из квадратиков. Алгоритм Брезенхэма решает, какие именно пиксели закрасить, используя <b>только сложение и вычитание целых чисел</b> (без медленного деления). Поэтому он идеально подходит для микроконтроллера.</p>
+  <div class="callout cnote"><span class="t">Где применяется</span>В нашем коде волну рисуем вертикальными отрезками (это ещё быстрее), а Брезенхэм используется для произвольных линий через <code>ILI9488_DrawLine</code>.</div>
+
+  <!-- ============ ADC ============ -->
+  <h2 class="sec" id="adc"><span class="n">2</span>Захват сигнала: АЦП + DMA</h2>
+  <p class="lead"><b>АЦП</b> (аналого-цифровой преобразователь) — это «измеритель напряжения». Он берёт напряжение на ножке и выдаёт целое число: 0 = 0 В, 4095 = 3.3 В.</p>
+
+  <h3>Дискретизация: превращаем плавный сигнал в точки</h3>
+  <p>АЦП измеряет не непрерывно, а <b>через равные промежутки</b> — это и есть «частота дискретизации». Чем чаще замеры, тем точнее видно быстрый сигнал.</p>
+  <div id="sampleDemo" class="demo">
+    <h4>📏 Поиграйте с частотой замеров</h4>
+    <canvas id="sampleCanvas" style="width:100%;height:170px;background:#050a07;border-radius:8px"></canvas>
+    <div class="controls">
+      <span class="pill">Замеров на экран: <span class="val" id="sampleN">40</span></span>
+      <input type="range" id="sampleSlider" min="8" max="200" value="40">
+      <span style="font-size:13px;color:var(--muted)">← двигайте: мало точек = волна «рассыпается», много = гладкая</span>
+    </div>
+  </div>
+
+  <h3>Как пересчитать число обратно в вольты</h3>
+  <p>Эта формула — сердце всех измерений. Она одна на весь проект (лежит в <code>adc_dma.h</code>), чтобы математика нигде не расходилась:</p>
+  <pre><div class="head"><span class="file">adc_dma.h</span></div><code class="c">// raw — число от АЦП (0..4095). VREF = 3.3 В, ADC_MAX = 4095
+#define ADC_RAW_TO_VOLT(raw)  (((float)(raw) / ADC_MAX) * ADC_VREF)
+// пример: raw=2048 → 2048/4095*3.3 ≈ 1.65 В  (середина шкалы)</code></pre>
+  <div class="callout analogy">АЦП — как линейка с делениями 0…4095. Чтобы узнать «сколько это в вольтах», делим деление на полную длину (4095) и умножаем на 3.3 В.</div>
+
+  <h3>Двойная буферизация (ping-pong): чтобы не терять данные</h3>
+  <p>Есть <b>две</b> коробки-буфера. Пока DMA наполняет первую, программа спокойно читает и рисует вторую. Потом меняются местами. Так данные не теряются и картинка не «рвётся».</p>
+  <div id="pingDemo" class="demo">
+    <h4>🏓 Ping-pong буферы в действии</h4>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div style="flex:1 1 200px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:6px">Буфер 0</div>
+        <div id="buf0" style="height:30px;border:1px solid var(--line);border-radius:8px;background:#0c1510;position:relative;overflow:hidden"><div class="fill" style="position:absolute;inset:0;width:0;background:linear-gradient(90deg,var(--green-dim),var(--green));transition:width .05s"></div><span class="lbl" style="position:relative;font-size:11px;padding:6px;color:var(--muted)"></span></div>
+      </div>
+      <div style="flex:1 1 200px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:6px">Буфер 1</div>
+        <div id="buf1" style="height:30px;border:1px solid var(--line);border-radius:8px;background:#0c1510;position:relative;overflow:hidden"><div class="fill" style="position:absolute;inset:0;width:0;background:linear-gradient(90deg,var(--green-dim),var(--green));transition:width .05s"></div><span class="lbl" style="position:relative;font-size:11px;padding:6px;color:var(--muted)"></span></div>
+      </div>
+    </div>
+    <div class="controls"><button class="btn" id="pingToggle">▶ Запустить</button><span class="pill" id="pingStatus">остановлено</span></div>
+  </div>
+
+  <p>В коде это всего две функции-«звонка» от железа. Когда DMA заполнил половину — срабатывает одна, когда вторую — другая:</p>
+  <pre><div class="head"><span class="file">adc_dma.c</span></div><code class="c">// Заполнилась первая половина → буфер 0 готов
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc){
+    adc_buf_ready    = 0;   // какой буфер читать
+    adc_capture_done = 1;   // флаг: «есть свежие данные!»
+}
+// Заполнилась вторая половина → буфер 1 готов
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc){
+    adc_buf_ready    = 1;
+    adc_capture_done = 1;
+}</code></pre>
+  <div class="callout warn"><span class="t">Важная деталь про железо</span>В задании просили положить буферы в сверхбыструю память CCMRAM. Но на STM32F4 «грузчик» DMA <b>физически не может</b> дотянуться до CCMRAM! Поэтому буферы лежат в обычной памяти SRAM — иначе захват вообще не работал бы. Это отмечено в коде.</div>
+
+  <!-- ============ ENCODER ============ -->
+  <h2 class="sec" id="encoder"><span class="n">3</span>Энкодеры и «серый код»</h2>
+  <p class="lead">Энкодер — это крутилка. У неё два контакта <b>A</b> и <b>B</b>. По тому, <i>в каком порядке</i> они замыкаются, программа понимает направление вращения.</p>
+
+  <h3>Почему именно два контакта</h3>
+  <p>При повороте сигналы A и B меняются <b>по очереди, со сдвигом</b>. Если сначала сменился A, потом B — крутят в одну сторону. Если наоборот — в другую. Такая последовательность называется <b>квадратурным (серым) кодом</b>: за раз меняется только один бит.</p>
+
+  <div id="encDemo" class="demo">
+    <h4>🎛️ Покрутите виртуальный энкодер</h4>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+      <div>
+        <div style="font-size:13px;color:var(--muted)">Сигналы контактов</div>
+        <div style="display:flex;gap:18px;margin-top:8px">
+          <div style="text-align:center"><div id="encA" class="bit" style="width:44px;height:44px;font-size:16px">0</div><div style="font-size:12px;color:var(--muted);margin-top:4px">A</div></div>
+          <div style="text-align:center"><div id="encB" class="bit" style="width:44px;height:44px;font-size:16px">0</div><div style="font-size:12px;color:var(--muted);margin-top:4px">B</div></div>
+        </div>
+      </div>
+      <div style="font-size:13px">
+        <div>Индекс в таблице: <span class="pill" id="encIdx">—</span></div>
+        <div style="margin-top:6px">Шаг: <span class="pill" id="encStep" style="color:var(--yellow)">0</span></div>
+        <div style="margin-top:6px">Накоплено четвертинок: <span class="pill" id="encSub">0</span> / 4</div>
+        <div style="margin-top:6px">Позиция (детенты): <span class="pill val" id="encPos">0</span></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="encCCW">⟲ Влево</button>
+      <button class="btn" id="encCW">⟳ Вправо</button>
+      <span style="font-size:13px;color:var(--muted)">4 «четвертинки» = один щелчок крутилки = ±1 позиция</span>
+    </div>
+  </div>
+
+  <h3>Магия одной таблицы</h3>
+  <p>Чтобы не писать кучу <code>if</code>-ов, направление определяет заранее посчитанная таблица. Берём <b>прошлое</b> состояние (2 бита) и <b>текущее</b> (2 бита), склеиваем в число 0…15 и смотрим в таблицу: там лежит −1, 0 или +1.</p>
+  <pre><div class="head"><span class="file">encoder.c</span></div><code class="c">// индекс = (прошлое_состояние &lt;&lt; 2) | текущее_состояние
+static const int8_t encoder_table[16] = {
+    0, -1,  1,  0,
+    1,  0,  0, -1,
+   -1,  0,  0,  1,
+    0,  1, -1,  0
+};
+// 0  = «дребезг» или нет движения
+// +1 = шаг в одну сторону,  -1 = в другую</code></pre>
+  <ul class="breakdown">
+    <li><code>prev &lt;&lt; 2</code><span>сдвигаем прошлое состояние влево, освобождая место для текущего</span></li>
+    <li><code>| curr</code><span>дописываем текущие 2 бита → получаем число 0…15</span></li>
+    <li><code>encoder_table[idx]</code><span>мгновенно узнаём направление, без ветвлений</span></li>
+  </ul>
+
+  <h3>Антидребезг кнопки</h3>
+  <p>Механическая кнопка при нажатии «дребезжит» — контакт быстро прыгает 0/1 несколько миллисекунд. Чтобы не считать это за 10 нажатий, мы запоминаем последние 8 замеров в одном байте (<b>сдвиговый регистр</b>) и реагируем, только когда <b>все восемь</b> подряд одинаковые.</p>
+  <pre><code class="c">c->sw_shift = (c->sw_shift &lt;&lt; 1) | raw;   // вдвигаем новый замер
+if (c->sw_shift == 0x00) { /* 8 нулей подряд → точно нажата */ }
+if (c->sw_shift == 0xFF) { /* 8 единиц подряд → точно отпущена */ }</code></pre>
+  <div class="callout analogy">Это как «переспросить»: реагируем не на первый писк, а когда 8 раз подряд услышали одно и то же — значит, не показалось.</div>
+
+  <!-- ============ TRIGGER ============ -->
+  <h2 class="sec" id="trigger"><span class="n">4</span>Триггер: чтобы волна «стояла»</h2>
+  <p class="lead">Без триггера каждая новая картинка начиналась бы со случайного места волны, и на экране была бы «каша». Триггер находит <b>одинаковую точку</b> (например, где сигнал пересекает заданный уровень снизу вверх) и всегда рисует с неё — волна замирает.</p>
+
+  <div id="trigDemo" class="demo">
+    <h4>🎯 Подвигайте уровень триггера</h4>
+    <canvas id="trigCanvas" style="width:100%;height:190px;background:#050a07;border-radius:8px"></canvas>
+    <div class="controls">
+      <span class="pill">Уровень: <span class="val" id="trigVal">50%</span></span>
+      <input type="range" id="trigSlider" min="10" max="90" value="50">
+      <label style="font-size:13px;color:var(--muted)"><input type="checkbox" id="trigEdge" checked> фронт вверх ↑</label>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin:6px 0 0">🔵 голубая линия — уровень. 🟡 жёлтая вертикаль — точка, где волна его пересекла в нужную сторону: отсюда начинается отрисовка.</p>
+  </div>
+
+  <p>В коде это короткий цикл: идём по числам и ищем момент, когда предыдущее значение было <b>ниже</b> уровня, а текущее стало <b>выше</b> (для фронта «вверх»):</p>
+  <pre><div class="head"><span class="file">trigger.c</span></div><code class="c">for (uint32_t i = 10; i &lt; len; i++) {     // старт с 10 — чтобы было место «до» точки
+    uint16_t prev = buf[i-1];
+    uint16_t curr = buf[i];
+    if (trigger.edge == TRIG_RISING) {
+        if (prev &lt; level &amp;&amp; curr &gt;= level)   // пересекли уровень снизу вверх
+            return (int32_t)i;                // нашли! вернули номер точки
+    }
+}
+return -1;                                    // не нашли ни одного пересечения</code></pre>
+  <div class="callout cnote"><span class="t">Три режима</span><b>AUTO</b> — рисуем всегда, даже без триггера (удобно искать сигнал). <b>NORMAL</b> — рисуем только при срабатывании (картинка стабильна). <b>SINGLE</b> — поймали один раз и остановились (для разовых событий).</div>
+
+  <!-- ============ MEAS ============ -->
+  <h2 class="sec" id="meas"><span class="n">5</span>Автоматические измерения</h2>
+  <p class="lead">Имея массив чисел, легко посчитать характеристики сигнала. Это обычная школьная математика по массиву.</p>
+
+  <table class="spec">
+    <tr><th>Величина</th><th>Что значит</th><th>Как считаем</th></tr>
+    <tr><td><code>Vmax / Vmin</code></td><td>Самая высокая / низкая точка</td><td>Идём по массиву, запоминаем макс и мин</td></tr>
+    <tr><td><code>Vpp</code></td><td>Размах волны</td><td>Vmax − Vmin</td></tr>
+    <tr><td><code>Vdc</code></td><td>Среднее (постоянная составляющая)</td><td>Сумма всех / количество</td></tr>
+    <tr><td><code>Vrms</code></td><td>Действующее значение</td><td>√(среднее квадратов)</td></tr>
+    <tr><td><code>Freq</code></td><td>Частота сигнала</td><td>Считаем, сколько раз волна пересекла среднюю линию</td></tr>
+  </table>
+
+  <h3>Частота через подсчёт пересечений</h3>
+  <p>За один период волна пересекает свою среднюю линию <b>ровно дважды</b> (вверх и вниз). Считаем пересечения — и зная, сколько замеров в секунду, вычисляем частоту. Чтобы шум не давал ложных пересечений, добавлена «мёртвая зона» (гистерезис ~5%).</p>
+  <pre><div class="head"><span class="file">measurements.c</span></div><code class="c">if (v &gt; mean_v + hyst) {              // явно выше средней (с запасом)
+    if (state == -1) crossings++;     // а только что были ниже → засчитали пересечение
+    state = 1;
+} else if (v &lt; mean_v - hyst) {       // явно ниже средней
+    if (state == 1) crossings++;
+    state = -1;
+}
+// период = расстояние между пересечениями; частота = замеров_в_сек / период</code></pre>
+  <div class="callout analogy">Гистерезис — как порог в дверях: чтобы «войти», надо переступить с запасом. Так мелкое дрожание у самой линии не считается за вход-выход.</div>
+
+  <!-- ============ UI ============ -->
+  <h2 class="sec" id="ui"><span class="n">6</span>Отрисовка экрана (и её хитрость)</h2>
+  <p class="lead">Экран рисуется по SPI, а это «дорого». Перерисовывать всю волну целиком 30 раз в секунду — медленно и она будет мигать. Решение — <b>обновлять только то, что изменилось</b>.</p>
+
+  <h3>Частичная перерисовка: помним прошлый кадр</h3>
+  <p>Для каждого столбца экрана (их 400) мы запоминаем, на какой высоте была волна в прошлый раз — массив <code>prev_y</code>. В новом кадре трогаем столбец, <b>только если высота изменилась</b>: стираем старую чёрточку, рисуем новую. Остальное не трогаем.</p>
+  <pre><div class="head"><span class="file">display_ui.c</span></div><code class="c">static int16_t prev_y[GRID_W];                    // высота волны в каждом столбце (прошлый кадр)
+
+for (int x = 0; x &lt; GRID_W; x++) {
+    uint8_t changed = (new_y[x] != prev_y[x]) || ...;
+    if (!changed) continue;                       // ничего не изменилось → пропускаем!
+    ui_restore_column(x);                         // стёрли старое, вернули сетку
+    // ... нарисовали новый отрезок волны
+}</code></pre>
+  <ul class="breakdown">
+    <li><code>prev_y[x]</code><span>где волна была в этом столбце в прошлом кадре</span></li>
+    <li><code>new_y[x]</code><span>где она теперь</span></li>
+    <li><code>continue</code><span>«пропустить» — если совпадает, не тратим время на перерисовку</span></li>
+  </ul>
+  <div class="callout analogy">Как редактировать рисунок: не перерисовывать весь лист, а ластиком поправить только те линии, что изменились. В разы быстрее.</div>
+
+  <h3>Из числа АЦП — в высоту пикселя</h3>
+  <p>Центр экрана — это «0 В». Чем больше число, тем выше точка. (По экрану Y растёт вниз, поэтому в формуле минус.)</p>
+  <pre><code class="c">y = ЦЕНТР − (raw − 2048) * масштаб;   // 2048 = середина → центр экрана
+if (y &lt; верх)  y = верх;              // не вылезаем за рамку
+if (y &gt; низ)   y = низ;</code></pre>
+
+  <!-- ============ FSM ============ -->
+  <h2 class="sec" id="fsm"><span class="n">7</span>Главный «мозг»: конечный автомат</h2>
+  <p class="lead">Прибор всегда находится в одном из состояний, и от него зависит поведение. Это называется <b>конечный автомат</b> (state machine).</p>
+
+  <div class="flow">
+    <div class="step"><div class="ic">▶️</div><div class="nm">RUNNING</div><div class="ds">ловим и рисуем волну</div></div>
+    <div class="arrow">⇄</div>
+    <div class="step"><div class="ic">⏸️</div><div class="nm">STOPPED</div><div class="ds">картинка застыла</div></div>
+    <div class="arrow">⇄</div>
+    <div class="step"><div class="ic">📋</div><div class="nm">MENU</div><div class="ds">быстрое меню</div></div>
+  </div>
+
+  <h3>Главный цикл — он крутится вечно</h3>
+  <p>Программа микроконтроллера никогда не «заканчивается». Внутри <code>main</code> есть бесконечный цикл <code>while(1)</code>, который снова и снова делает три вещи: опросить крутилки, отреагировать на них, и если пришли свежие данные — обработать и нарисовать.</p>
+  <pre><div class="head"><span class="file">oscilloscope.c</span></div><code class="c">void Oscilloscope_Run(void){
+    Encoder_Update();                              // 1. опросили крутилки (раз в ~1 мс)
+    Oscilloscope_HandleEnc1(Encoder_GetDelta(&amp;enc1), enc1.btn_pressed);  // 2. отреагировали
+    Oscilloscope_HandleEnc2(Encoder_GetDelta(&amp;enc2), enc2.btn_pressed);
+
+    if (osc.state == OSC_RUNNING &amp;&amp; adc_capture_done) {   // 3. есть свежий буфер?
+        osc_process_frame();                       //    → триггер + измерения + рисуем
+    }
+}</code></pre>
+  <div class="callout analogy">Это «сердцебиение» прибора: каждый удар — проверить кнопки и, если есть новые данные, обновить экран. Так — миллионы раз, пока включено питание.</div>
+
+  <h3>Что делает один «кадр»</h3>
+  <pre><code class="c">static void osc_process_frame(void){
+    const uint16_t *buf = adc_buf[adc_buf_ready];      // берём готовый буфер
+    int32_t trig_pos = Trigger_Find(buf, len);         // 1. ищем точку триггера
+    Measurements_Calculate(buf, len, ...);             // 2. считаем Vpp/частоту/...
+    UI_DrawWaveform(buf, len, trig_pos, ...);          // 3. рисуем волну
+    UI_DrawMeasurements(...);                          // 4. обновляем цифры внизу
+}</code></pre>
+
+  <!-- ============ GLOSSARY ============ -->
+  <h2 class="sec" id="glossary"><span class="n">A</span>Словарик терминов</h2>
+  <div class="card">
+    <table class="spec">
+      <tr><th>Термин</th><th>Простыми словами</th></tr>
+      <tr><td><b>АЦП (ADC)</b></td><td>Измеритель напряжения: вольты → число 0…4095</td></tr>
+      <tr><td><b>DMA</b></td><td>«Грузчик», что таскает данные в память без процессора</td></tr>
+      <tr><td><b>SPI</b></td><td>Быстрый провод для общения с дисплеем (данные + такты)</td></tr>
+      <tr><td><b>Буфер</b></td><td>Кусок памяти-«коробка», куда складывают замеры</td></tr>
+      <tr><td><b>Триггер</b></td><td>Условие старта картинки, чтобы волна не «убегала»</td></tr>
+      <tr><td><b>Дискретизация</b></td><td>Замеры через равные промежутки времени</td></tr>
+      <tr><td><b>Прерывание (ISR)</b></td><td>Срочная функция-«звонок» от железа</td></tr>
+      <tr><td><b>Серый код</b></td><td>Способ кодирования, где за раз меняется один бит (энкодер)</td></tr>
+      <tr><td><b>RGB565</b></td><td>Цвет в 16 битах: 5 красного + 6 зелёного + 5 синего</td></tr>
+      <tr><td><b>FPU</b></td><td>Встроенный «калькулятор» для дробных чисел — быстрые float</td></tr>
+      <tr><td><b>Vpp</b></td><td>Размах сигнала: от самой нижней до самой верхней точки</td></tr>
+      <tr><td><b>Гистерезис</b></td><td>«Мёртвая зона», чтобы шум не давал ложных срабатываний</td></tr>
+    </table>
+  </div>
+
+  <footer>
+    Интерактивный разбор прошивки осциллографа на STM32F411 · все демки работают локально, без интернета.<br>
+    Сделано как учебное дополнение к исходному коду в <code>Core/Src</code> и <code>Core/Inc</code>.
+  </footer>
+</main>
+</div>
+
+<script>
+/* ---------- Подсветка кода (мини-«хайлайтер» для C) ---------- */
+(function(){
+  const kw = new Set(('void int float char const static return if else for while do break continue '+
+    'struct typedef enum switch case default sizeof volatile unsigned signed').split(' '));
+  const ty = new Set(('uint8_t uint16_t uint32_t int8_t int16_t int32_t Encoder_t ADC_HandleTypeDef '+
+    'TriggerMode_t int16_t bool size_t').split(' '));
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function hl(raw){
+    // токенизация через единый проход
+    const re=/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:[^"\\]|\\.)*")|(#\w+)|([A-Za-z_]\w*)|(0x[0-9A-Fa-f]+|\d+\.?\d*[fFuUlL]*)/g;
+    let out='',last=0,m;
+    while((m=re.exec(raw))){
+      out+=esc(raw.slice(last,m.index));
+      const t=m[0];
+      if(m[1]) out+='<span class="tok-com">'+esc(t)+'</span>';
+      else if(m[2]) out+='<span class="tok-str">'+esc(t)+'</span>';
+      else if(m[3]) out+='<span class="tok-pp">'+esc(t)+'</span>';
+      else if(m[4]){
+        if(kw.has(t)) out+='<span class="tok-kw">'+t+'</span>';
+        else if(ty.has(t)) out+='<span class="tok-ty">'+t+'</span>';
+        else out+=esc(t);
+      }
+      else if(m[5]) out+='<span class="tok-num">'+esc(t)+'</span>';
+      last=re.lastIndex;
+    }
+    out+=esc(raw.slice(last));
+    return out;
+  }
+  document.querySelectorAll('code.c').forEach(el=>{
+    // берём исходный текст уже «разэкранированный» браузером
+    el.innerHTML=hl(el.textContent);
+  });
+})();
+
+/* ---------- Активный пункт навигации при скролле ---------- */
+(function(){
+  const links=[...document.querySelectorAll('nav.side a')];
+  const map=links.map(a=>({a,sec:document.querySelector(a.getAttribute('href'))})).filter(x=>x.sec);
+  function onScroll(){
+    let cur=map[0];
+    const y=window.scrollY+120;
+    for(const it of map){ if(it.sec.offsetTop<=y) cur=it; }
+    links.forEach(a=>a.classList.remove('active'));
+    if(cur) cur.a.classList.add('active');
+  }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+})();
+
+/* ---------- Hero: анимированная осциллограмма ---------- */
+(function(){
+  const c=document.getElementById('heroScope'); if(!c)return;
+  const ctx=c.getContext('2d'); let t=0;
+  function resize(){c.width=c.clientWidth*devicePixelRatio;c.height=c.clientHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);}
+  resize(); window.addEventListener('resize',resize);
+  function draw(){
+    const w=c.clientWidth,h=c.clientHeight; ctx.clearRect(0,0,w,h);
+    ctx.lineWidth=2; ctx.strokeStyle='#ffe05a'; ctx.shadowBlur=8; ctx.shadowColor='#ffe05a';
+    ctx.beginPath();
+    for(let x=0;x<=w;x++){
+      const ph=x/w*Math.PI*6 - t;
+      const y=h/2 - Math.sin(ph)*h*0.3 - Math.sin(ph*2.7)*h*0.06;
+      x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke(); ctx.shadowBlur=0;
+    t+=0.04; requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ---------- Демо: буква A из шрифта 5x7 ---------- */
+(function(){
+  const cols=[0x7E,0x11,0x11,0x11,0x7E]; // буква A
+  const wrap=document.getElementById('fontGrid'); if(!wrap)return;
+  cols.forEach(col=>{
+    const c=document.createElement('div');
+    c.style.display='flex'; c.style.flexDirection='column'; c.style.gap='4px';
+    for(let row=0;row<7;row++){
+      const on=(col>>row)&1;
+      const cell=document.createElement('div');
+      cell.className='bit'+(on?' on':'');
+      c.appendChild(cell);
+    }
+    wrap.appendChild(c);
+  });
+})();
+
+/* ---------- Демо: частота дискретизации ---------- */
+(function(){
+  const cv=document.getElementById('sampleCanvas'),sl=document.getElementById('sampleSlider'),lbl=document.getElementById('sampleN');
+  if(!cv)return; const ctx=cv.getContext('2d');
+  function resize(){cv.width=cv.clientWidth*devicePixelRatio;cv.height=cv.clientHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);}
+  function sig(p){return Math.sin(p*Math.PI*4)*0.7+Math.sin(p*Math.PI*8)*0.18;}
+  function draw(){
+    resize(); const w=cv.clientWidth,h=cv.clientHeight,n=+sl.value; lbl.textContent=n;
+    ctx.clearRect(0,0,w,h);
+    // настоящая гладкая волна
+    ctx.strokeStyle='rgba(127,166,146,.5)';ctx.lineWidth=1.5;ctx.beginPath();
+    for(let x=0;x<=w;x++){const y=h/2-sig(x/w)*h*0.38;x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+    ctx.stroke();
+    // дискретные замеры (точки) + восстановленная ломаная
+    ctx.strokeStyle='#ffe05a';ctx.fillStyle='#39e08a';ctx.lineWidth=2;ctx.beginPath();
+    for(let i=0;i<=n;i++){const x=i/n*w;const y=h/2-sig(i/n)*h*0.38;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+    ctx.stroke();
+    for(let i=0;i<=n;i++){const x=i/n*w;const y=h/2-sig(i/n)*h*0.38;ctx.beginPath();ctx.arc(x,y,2.5,0,7);ctx.fill();}
+  }
+  sl.addEventListener('input',draw); window.addEventListener('resize',draw); draw();
+})();
+
+/* ---------- Демо: ping-pong буферы ---------- */
+(function(){
+  const b0=document.querySelector('#buf0 .fill'),b1=document.querySelector('#buf1 .fill');
+  const l0=document.querySelector('#buf0 .lbl'),l1=document.querySelector('#buf1 .lbl');
+  const btn=document.getElementById('pingToggle'),st=document.getElementById('pingStatus');
+  if(!b0)return; let on=false,active=0,p=0,raf=null;
+  function frame(){
+    p+=2;
+    if(p>=100){p=0; (active===0?l0:l1).textContent='✓ готов — читаем и рисуем';
+      active=1-active;}
+    const fillA=active===0?b0:b1, fillB=active===0?b1:b0;
+    const lA=active===0?l0:l1, lB=active===0?l1:l0;
+    fillA.style.width=p+'%'; lA.textContent='DMA пишет... '+p+'%';
+    fillB.style.width='100%';
+    raf=requestAnimationFrame(frame);
+  }
+  btn.addEventListener('click',()=>{
+    on=!on;
+    if(on){btn.textContent='⏸ Пауза';st.textContent='захват идёт';frame();}
+    else{btn.textContent='▶ Запустить';st.textContent='пауза';cancelAnimationFrame(raf);}
+  });
+})();
+
+/* ---------- Демо: энкодер ---------- */
+(function(){
+  const seq=[0b00,0b01,0b11,0b10]; // последовательность состояний (A<<1|B)
+  const table=[0,-1,1,0, 1,0,0,-1, -1,0,0,1, 0,1,-1,0];
+  let i=0,sub=0,pos=0;
+  const eA=document.getElementById('encA'),eB=document.getElementById('encB');
+  const eIdx=document.getElementById('encIdx'),eStep=document.getElementById('encStep'),
+        eSub=document.getElementById('encSub'),ePos=document.getElementById('encPos');
+  if(!eA)return;
+  function render(prevState,curState,step){
+    const A=(curState>>1)&1,B=curState&1;
+    eA.textContent=A;eB.textContent=B;eA.classList.toggle('on',!!A);eB.classList.toggle('on',!!B);
+    if(prevState!=null){
+      const idx=(prevState<<2)|curState;
+      eIdx.textContent=idx+' (0b'+idx.toString(2).padStart(4,'0')+')';
+      eStep.textContent=(step>0?'+':'')+step;
+      eStep.style.color=step>0?'#39e08a':step<0?'#ff5a6a':'#7fa692';
+    }
+    eSub.textContent=Math.abs(sub); ePos.textContent=pos;
+  }
+  function turn(dir){
+    const prev=seq[i];
+    i=(i+ (dir>0?1:seq.length-1))%seq.length;
+    const cur=seq[i];
+    const idx=(prev<<2)|cur; const step=table[idx];
+    sub+=step;
+    if(sub>=4){sub-=4;pos++;} else if(sub<=-4){sub+=4;pos--;}
+    render(prev,cur,step);
+  }
+  document.getElementById('encCW').addEventListener('click',()=>turn(+1));
+  document.getElementById('encCCW').addEventListener('click',()=>turn(-1));
+  render(null,seq[0],0);
+})();
+
+/* ---------- Демо: триггер ---------- */
+(function(){
+  const cv=document.getElementById('trigCanvas'),sl=document.getElementById('trigSlider'),
+        val=document.getElementById('trigVal'),edge=document.getElementById('trigEdge');
+  if(!cv)return; const ctx=cv.getContext('2d');
+  function resize(){cv.width=cv.clientWidth*devicePixelRatio;cv.height=cv.clientHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);}
+  function sig(p){return Math.sin(p*Math.PI*5);} // -1..1
+  function draw(){
+    resize(); const w=cv.clientWidth,h=cv.clientHeight; ctx.clearRect(0,0,w,h);
+    const lv=+sl.value/100; val.textContent=sl.value+'%';
+    const rising=edge.checked;
+    // уровень (0..1 сверху вниз → пересчёт в -1..1)
+    const lvNorm=1-2*lv;                       // значение сигнала на уровне
+    const yLevel=h/2-lvNorm*h*0.4;
+    // волна
+    ctx.strokeStyle='#ffe05a';ctx.lineWidth=2;ctx.beginPath();
+    for(let x=0;x<=w;x++){const y=h/2-sig(x/w)*h*0.4;x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+    ctx.stroke();
+    // линия уровня
+    ctx.strokeStyle='#33e0e0';ctx.setLineDash([6,5]);ctx.lineWidth=1.5;ctx.beginPath();
+    ctx.moveTo(0,yLevel);ctx.lineTo(w,yLevel);ctx.stroke();ctx.setLineDash([]);
+    // ищем первое пересечение нужного направления
+    let trigX=null,prev=sig(0);
+    for(let x=1;x<=w;x++){
+      const cur=sig(x/w);
+      if(rising && prev<lvNorm && cur>=lvNorm){trigX=x;break;}
+      if(!rising && prev>lvNorm && cur<=lvNorm){trigX=x;break;}
+      prev=cur;
+    }
+    if(trigX!=null){
+      ctx.strokeStyle='#39e08a';ctx.lineWidth=2;ctx.beginPath();
+      ctx.moveTo(trigX,0);ctx.lineTo(trigX,h);ctx.stroke();
+      ctx.fillStyle='#39e08a';ctx.beginPath();ctx.arc(trigX,yLevel,4,0,7);ctx.fill();
+    }
+  }
+  sl.addEventListener('input',draw);edge.addEventListener('change',draw);
+  window.addEventListener('resize',draw); draw();
+})();
+</script>
+</body>
+</html>
