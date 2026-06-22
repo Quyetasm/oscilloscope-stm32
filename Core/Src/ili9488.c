@@ -125,9 +125,27 @@ static const uint8_t font5x7[(FONT_LAST_CHAR - FONT_FIRST_CHAR + 1)][FONT_WIDTH]
 /* Low-level SPI helpers                                                    */
 /* ----------------------------------------------------------------------- */
 
-/** Chunk buffer for streaming pixels (PIXEL_CHUNK pixels x 2 bytes). */
+/*
+ * ILI9488 over 4-wire SPI only supports 18bpp (3 bytes/pixel, RGB666).
+ * Colors are kept as RGB565 throughout the project and expanded to 3 bytes
+ * here, at the lowest level.
+ */
+#define PIXEL_BYTES 3U
+
+/** Chunk buffer for streaming pixels (PIXEL_CHUNK pixels x 3 bytes). */
 #define PIXEL_CHUNK 64U
-static uint8_t pixel_buf[PIXEL_CHUNK * 2U];
+static uint8_t pixel_buf[PIXEL_CHUNK * PIXEL_BYTES];
+
+/** @brief Expand an RGB565 color into 3 RGB666 bytes (top 6 bits used). */
+static inline void rgb565_to_rgb666(uint16_t c, uint8_t *out)
+{
+    uint8_t r5 = (uint8_t)((c >> 11) & 0x1F);
+    uint8_t g6 = (uint8_t)((c >> 5)  & 0x3F);
+    uint8_t b5 = (uint8_t)( c        & 0x1F);
+    out[0] = (uint8_t)((r5 << 3) | (r5 >> 2));
+    out[1] = (uint8_t)((g6 << 2) | (g6 >> 4));
+    out[2] = (uint8_t)((b5 << 3) | (b5 >> 2));
+}
 
 /** @brief Assert chip-select (active LOW). */
 static inline void ili_cs_low(void)  { HAL_GPIO_WritePin(ILI9488_CS_PORT, ILI9488_CS_PIN, GPIO_PIN_RESET); }
@@ -165,16 +183,17 @@ static void ili_write_data8(uint8_t d)
  */
 static void ili_push_color(uint16_t color, uint32_t count)
 {
-    uint8_t hi = (uint8_t)(color >> 8);
-    uint8_t lo = (uint8_t)(color & 0xFF);
+    uint8_t px[PIXEL_BYTES];
+    rgb565_to_rgb666(color, px);
     for (uint32_t i = 0U; i < PIXEL_CHUNK; i++) {
-        pixel_buf[2U * i]      = hi;
-        pixel_buf[2U * i + 1U] = lo;
+        pixel_buf[PIXEL_BYTES * i]      = px[0];
+        pixel_buf[PIXEL_BYTES * i + 1U] = px[1];
+        pixel_buf[PIXEL_BYTES * i + 2U] = px[2];
     }
     ili_dc_data();
     while (count > 0U) {
         uint32_t n = (count > PIXEL_CHUNK) ? PIXEL_CHUNK : count;
-        HAL_SPI_Transmit(&hspi1, pixel_buf, (uint16_t)(n * 2U), HAL_MAX_DELAY_MS);
+        HAL_SPI_Transmit(&hspi1, pixel_buf, (uint16_t)(n * PIXEL_BYTES), HAL_MAX_DELAY_MS);
         count -= n;
     }
 }
@@ -219,10 +238,11 @@ void ILI9488_DrawPixel(uint16_t x, uint16_t y, uint16_t color)
     if (x >= ILI9488_WIDTH || y >= ILI9488_HEIGHT) {
         return;
     }
-    uint8_t buf[2] = { (uint8_t)(color >> 8), (uint8_t)(color & 0xFF) };
+    uint8_t buf[PIXEL_BYTES];
+    rgb565_to_rgb666(color, buf);
     ili_cs_low();
     ILI9488_SetWindow(x, y, x, y);
-    ili_write_data(buf, 2U);
+    ili_write_data(buf, PIXEL_BYTES);
     ili_cs_high();
 }
 
@@ -425,12 +445,11 @@ void ILI9488_Init(void)
     ili_write_cmd(ILI9488_CMD_MADCTL);
     ili_write_data8(ILI9488_MADCTL_LANDSCAPE);
 
-    /* Interface pixel format: 16 bits/pixel (RGB565), value 0x55.
-     * TODO: verify on hardware. Some ILI9488 panels in 4-wire SPI only accept
-     * 18bpp (0x66, 3 bytes/pixel); if so switch PIXFMT to 0x66 and adapt the
-     * pixel push routine to emit 3 bytes per pixel. */
+    /* Interface pixel format: 18 bits/pixel (RGB666), value 0x66.
+     * ILI9488 over 4-wire SPI does not support 16bpp; pixels are written as
+     * 3 bytes/pixel (see rgb565_to_rgb666 / ili_push_color). */
     ili_write_cmd(ILI9488_CMD_PIXFMT);
-    ili_write_data8(0x55);
+    ili_write_data8(0x66);
 
     /* Interface mode control. */
     ili_write_cmd(ILI9488_CMD_IFMODE);  ili_write_data8(0x00);
