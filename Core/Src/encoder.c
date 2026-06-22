@@ -150,3 +150,17 @@ int32_t Encoder_GetDelta(Encoder_t *e)
     __enable_irq();
     return d;
 }
+
+/*
+ * Poll the encoders from the 1 ms SysTick interrupt by overriding the weak
+ * HAL_IncTick(). This guarantees a steady sample rate even while the main loop
+ * is busy streaming a full frame to the display over SPI -- otherwise the
+ * polling stalls during rendering and quadrature edges are missed, making the
+ * encoders feel dead or erratic. Assumes the default 1 kHz tick.
+ */
+void HAL_IncTick(void)
+{
+    extern volatile uint32_t uwTick;
+    uwTick++;
+    Encoder_Update();
+}
