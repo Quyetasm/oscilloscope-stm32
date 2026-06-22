@@ -278,16 +278,8 @@ static void osc_process_frame(void)
 
 void Oscilloscope_Run(void)
 {
-    static uint32_t last_enc_tick = 0U;
-
-    /* Poll encoders at ~1 ms cadence. */
-    uint32_t now = HAL_GetTick();
-    if ((now - last_enc_tick) >= 1U) {
-        last_enc_tick = now;
-        Encoder_Update();
-    }
-
-    /* Dispatch encoder events. */
+    /* Encoders are sampled in the 1 ms SysTick ISR (see HAL_IncTick in
+     * encoder.c); here we only consume the accumulated movement. */
     Oscilloscope_HandleEnc1(Encoder_GetDelta(&enc1), enc1.btn_pressed);
     Oscilloscope_HandleEnc2(Encoder_GetDelta(&enc2), enc2.btn_pressed);
 
