@@ -129,10 +129,11 @@ void Error_Handler(void)
     }
 }
 
-/* ---- Core interrupt handlers (subset normally in stm32f4xx_it.c) ------- */
-
-/** @brief SysTick ISR: keep the HAL tick running. */
-void SysTick_Handler(void)
-{
-    HAL_IncTick();
-}
+/*
+ * NOTE: SysTick_Handler is intentionally NOT defined here. In a CubeIDE/CubeMX
+ * project it is generated in stm32f4xx_it.c (and already calls HAL_IncTick()),
+ * so defining it here too would cause a "multiple definition" link error.
+ * The ADC1 / DMA2_Stream0 interrupt handlers live in adc_dma.c because those
+ * interrupts are enabled in code rather than via CubeMX; if you later enable
+ * them in the .ioc, remove the duplicates from stm32f4xx_it.c the same way.
+ */
